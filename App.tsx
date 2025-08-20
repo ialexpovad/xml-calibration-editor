@@ -1,16 +1,8 @@
 import * as React from "react";
-import XmlEditor from "./lib/XmlEditor";
+import XmlEditor, { XmlEditorHandle } from "./lib/XmlEditor";
 import * as Util from "./lib/Util";
 import Builder from "./lib/Builder";
 import { DocSpec, Xml } from "./lib/types";
-
-// ---- Type augmentations for XmlEditor ----
-declare module "./lib/XmlEditor" {
-  export default interface XmlEditor {
-    loadString: (xml: string) => void;     // public method
-    getXml(): Xml | undefined;      // returns a DOM Node or null
-  }
-}
 
 type Theme = "light" | "dark";
 
@@ -43,6 +35,7 @@ const k40Template = `
   </density>
 </nuclide>`.trim();
 
+// --- DocSpec setup ---
 const docSpec: DocSpec = {
   elements: {
     calibration: {
@@ -54,10 +47,7 @@ const docSpec: DocSpec = {
       ],
     },
     geometry: {
-      attributes: {
-        name: { asker: Util.askString },
-        volume: { asker: Util.askString },
-      },
+      attributes: { name: { asker: Util.askString }, volume: { asker: Util.askString } },
       menu: [
         { action: Util.newElementChild('<mix name="Cs+K" />'), caption: "Добавить состав" },
         { action: Util.deleteElement, caption: "Удалить геометрию" },
@@ -97,11 +87,7 @@ const docSpec: DocSpec = {
       ],
     },
     vector: {
-      attributes: {
-        w: { asker: Util.askString },
-        n: { asker: Util.askString },
-        value: { asker: Util.askString },
-      },
+      attributes: { w: { asker: Util.askString }, n: { asker: Util.askString }, value: { asker: Util.askString } },
       menu: [{ action: Util.deleteElement, caption: "Удалить вектор" }],
     },
   },
@@ -126,7 +112,7 @@ export default function App() {
   const [fileName, setFileName] = React.useState("calibration.xml");
   const [lastSaved, setLastSaved] = React.useState<Date | null>(null);
   const [xmlPreview, setXmlPreview] = React.useState("");
-  const ref = React.useRef<XmlEditor | null>(null);
+  const editorRef = React.useRef<XmlEditorHandle | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
@@ -139,8 +125,6 @@ export default function App() {
     "• Ctrl+S — Сохранить XML",
     "• Ctrl+Enter — Собрать (обновить XML из редактора)",
     "• ? — Справка",
-    "",
-    // "Подсказка: вводите числа с запятой или точкой — система сама нормализует.",
   ].join("\n");
 
   React.useEffect(() => {
@@ -155,11 +139,11 @@ export default function App() {
   }, []);
 
   const onHarvest = () => {
-    if (!ref.current) return;
+    if (!editorRef.current) return;
+    const xmlNode = editorRef.current.getXml();
+    if (!xmlNode) return;
     const builder = new Builder({});
-    const xml = ref.current.getXml();
-    if (!xml) return;
-    setXmlPreview(builder.buildObject(xml));
+    setXmlPreview(builder.buildObject(xmlNode));
   };
 
   const onOpenClick = () => fileInputRef.current?.click();
@@ -170,16 +154,16 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        if (!ref.current) return;
+        if (!editorRef.current) return;
         setFileName(f.name);
         const text = String(reader.result).replace(
           /(?<=["=])([0-9]+(?:,[0-9]+)+)/g,
           (m) => prettyNumber(m)
         );
-        ref.current.loadString(text);
+        editorRef.current.loadString(text);
         setXmlPreview(text);
       } catch (err) {
-        alert("Ошибка при чтении файла: " + err);
+        alert("Ошибка при чтении файла калибровки: " + err);
       }
     };
     reader.readAsText(f, "utf-8");
@@ -218,10 +202,10 @@ export default function App() {
   };
 
   const onSave = () => {
-    if (!ref.current) return;
-    const builder = new Builder({});
-    const xmlNode = ref.current.getXml();
+    if (!editorRef.current) return;
+    const xmlNode = editorRef.current.getXml();
     if (!xmlNode) return;
+    const builder = new Builder({});
     const xmlStr = builder.buildObject(xmlNode);
 
     const errors = validateBeforeSave(xmlStr);
@@ -239,53 +223,32 @@ export default function App() {
     <div className="app" data-theme={theme}>
       <header className="app__bar">
         <div className="app__brand">☢️ Калибровка (XML)</div>
-        <button
-          className="btn"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          aria-label="Сменить тему"
-        >
+        <button className="btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
           Тема: {theme === "dark" ? "Тёмная" : "Светлая"}
         </button>
         <div className="app__spacer" />
-        <button className="btn" title="Открыть XML (Ctrl+O)" onClick={onOpenClick} aria-label="Открыть XML">
-          Открыть XML
-        </button>
-        <button className="btn" onClick={onHarvest} title="Собрать (Ctrl+Enter)" aria-label="Собрать XML">
-          Собрать
-        </button>
-        <button className="btn btn--primary" onClick={onSave} title="Сохранить (Ctrl+S)" aria-label="Сохранить XML">
-          Сохранить
-        </button>
-        <button className="btn" onClick={() => alert(helpText)} aria-label="Помощь">
-          ?
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".xml"
-          style={{ display: "none" }}
-          onChange={onOpenFile}
-        />
+        <button className="btn" onClick={onOpenClick}>Открыть XML</button>
+        <button className="btn" onClick={onHarvest}>Собрать</button>
+        <button className="btn btn--primary" onClick={onSave}>Сохранить</button>
+        <button className="btn" onClick={() => alert(helpText)}>?</button>
+        <input ref={fileInputRef} type="file" accept=".xml" style={{ display: "none" }} onChange={onOpenFile} />
       </header>
 
       <main className="app__main">
         <section className="panel">
-          <XmlEditor docSpec={docSpec} ref={ref} xml={initialXml} />
+          <XmlEditor ref={editorRef} docSpec={docSpec} xml={initialXml} />
         </section>
 
         <aside className="panel" style={{ overflow: "auto" }}>
-          <h3 style={{ margin: "6px 6px 10px" }}>Справка / Подсказки</h3>
+          <h3>Справка / Подсказки</h3>
           <div className="kv">
             <b>Формат</b><span>calibration → geometry → mix → nuclide → density → vector</span>
             <b>Быстрые действия</b><span>ПКМ по элементам → меню (добавить/удалить).</span>
-            {/* <b>Числа</b><span>Можно вводить с запятой, мы конвертируем → «.»</span> */}
             <b>Единицы</b><span>activity (Бк), volume (л), диапазоны энергий left/right.</span>
           </div>
           <div className="hr" />
-          <h4 style={{ margin: "8px 0 6px" }}>XML предпросмотр</h4>
-          <pre style={{ whiteSpace: "pre-wrap", color: "#9aa4b2" }}>
-            {xmlPreview || "— пока пусто —"}
-          </pre>
+          <h4>XML предпросмотр</h4>
+          <pre style={{ whiteSpace: "pre-wrap", color: "#9aa4b2" }}>{xmlPreview || "— пока пусто —"}</pre>
         </aside>
       </main>
 
@@ -301,7 +264,6 @@ export default function App() {
         <span>•</span>
         <span>Горячие клавиши: Ctrl+O / Ctrl+S / Ctrl+Enter</span>
       </footer>
-
     </div>
   );
 }
