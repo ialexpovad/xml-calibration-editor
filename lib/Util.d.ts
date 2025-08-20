@@ -1,0 +1,25 @@
+import * as React from 'react';
+import { AskerOptions, AskerParameter, Element, Xml } from './types';
+export declare const modifyXml: (xml: any, id: string[], modifier: (xml: Element) => any) => Xml;
+export declare const getXmlNode: (xml: any, id: string[]) => any;
+export declare const deleteNode: (xml: Xml, id: string[]) => Xml;
+export declare const updateNode: (xml: Xml, id: string[], value: string | boolean) => Xml;
+export declare const newElementChild: (parameter: string) => (xml: Xml, id: string[]) => Promise<Xml>;
+export declare const newTextChild: (parameter: string) => (xml: Xml, id: string[]) => Promise<Xml>;
+export declare const newElementBefore: (parameter: string) => (xml: Xml, id: string[]) => Promise<Xml>;
+export declare const newElementAfter: (parameter: string) => (xml: Xml, id: string[]) => Promise<Xml>;
+export declare const duplicateElement: (xml: Xml, id: string[]) => Xml;
+export declare const moveElementUp: (xml: Xml, id: string[]) => Xml;
+export declare const canMoveElementUp: (xml: Xml, id: string[]) => boolean;
+export declare const canMoveElementDown: (xml: Xml, id: string[]) => boolean;
+export declare const moveElementDown: (xml: Xml, id: string[]) => Xml;
+export declare const newAttribute: (parameter: {
+    name: string;
+    value: string;
+}) => (xml: Xml, id: string[]) => Xml;
+export declare const deleteElement: (xml: Xml, id: string[]) => Xml;
+export declare const deleteAttribute: (xml: Xml, id: string[]) => Xml;
+export declare const push: (arr: string[], ...newValues: string[]) => string[];
+export declare const askPicklist: (parameter: AskerParameter) => (options: AskerOptions) => React.JSX.Element;
+export declare const askString: (options: AskerOptions) => React.JSX.Element;
+export declare const askLongString: (options: AskerOptions) => React.JSX.Element;
