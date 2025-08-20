@@ -1,11 +1,16 @@
 import * as React from "react";
-import XmlEditor from "./lib/XmlEditor";
-import * as Util from "./lib/Util";
-import Builder from "./lib/Builder";
-import { DocSpec, Xml } from "./lib/types";
+import XmlEditor from "../lib/XmlEditor";
+import * as Util from "../lib/Util";
+import Builder from "../lib/Builder";
+import { DocSpec, Xml } from "../lib/types";
+
+export interface XmlEditorHandle {
+  loadString: (xml: string) => void;
+  getXml: () => Xml | undefined;
+}
 
 // ---- Type augmentations for XmlEditor ----
-declare module "./lib/XmlEditor" {
+declare module "../lib/XmlEditor" {
   export default interface XmlEditor {
     loadString: (xml: string) => void;     // public method
     getXml(): Xml | undefined;      // returns a DOM Node or null
@@ -176,10 +181,10 @@ export default function App() {
           /(?<=["=])([0-9]+(?:,[0-9]+)+)/g,
           (m) => prettyNumber(m)
         );
-        ref.current.loadString(text);
+        ref.current?.loadString(text);
         setXmlPreview(text);
       } catch (err) {
-        alert("Ошибка при чтении файла калибровки: " + err);
+        alert("Ошибка при чтении файла: " + err);
       }
     };
     reader.readAsText(f, "utf-8");
