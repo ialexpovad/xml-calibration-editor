@@ -2,8 +2,8 @@ name: Deploy Vite React App to GitHub Pages
 
 on:
   push:
-    branches: ["main"]   # Deploy on push to main branch
-  workflow_dispatch:      # Allow manual trigger
+    branches: ["main"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,23 +24,23 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '20' # or 22
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm install
 
       - name: Build app
-        run: npm run build  # Vite builds into dist/
+        run: npm run build
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v1
+      - name: Upload artifact for GitHub Pages
+        uses: actions/upload-pages-artifact@v3   # <- updated version
         with:
           path: ./dist
 
   deploy:
-    runs-on: ubuntu-latest
     needs: build
+    runs-on: ubuntu-latest
     steps:
       - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v1
+        uses: actions/deploy-pages@v4   # <- latest version
