@@ -18,6 +18,7 @@ export default class XmlEditor extends React.Component<Props & DefaultProps, Sta
     constructor(props: Props & DefaultProps);
     componentDidMount(): void;
     getXml(): Xml | undefined;
+    loadString(xmlStr: string): void;
     private onClick;
     private setXml;
     private showBubble;
