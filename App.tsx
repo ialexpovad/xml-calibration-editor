@@ -676,8 +676,14 @@ const [fileName, setFileName] = React.useState(() => {
     <div className="app" data-theme={theme}>
       {/* HEADER */}
       <header className="app__bar">
-        <div className="app__brand">☢️ Калибровка (XML)</div>
-
+        <div className="app__brand" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <img
+            src="./css/icon.svg"
+            alt="ATOMTEX radiation icon"
+            style={{ width: 24, height: 24 }}
+          />
+          Редактор калибровоки (XML)
+        </div>
         <button
           className="btn"
           onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
