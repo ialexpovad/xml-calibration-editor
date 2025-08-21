@@ -3,21 +3,67 @@ import XmlEditor from "../lib/XmlEditor";
 import * as Util from "../lib/Util";
 import Builder from "../lib/Builder";
 import { DocSpec, Xml } from "../lib/types";
+import {
+  Moon,
+  Sun,
+  Save,
+  FileUp,
+  FileDown,
+  HelpCircle,
+  Code2,
+  Zap,
+  Ruler,
+  ChevronUp,
+  ChevronDown,
+} from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion"; // for animation
 
+// -----------------------------
+// Module augmentation (XmlEditor public API)
+// -----------------------------
 export interface XmlEditorHandle {
   loadString: (xml: string) => void;
   getXml: () => Xml | undefined;
 }
 
-// ---- Type augmentations for XmlEditor ----
 declare module "../lib/XmlEditor" {
+  // augment whatever XmlEditor exports so TS knows about these methods
   export default interface XmlEditor {
-    loadString: (xml: string) => void;     // public method
-    getXml(): Xml | undefined;      // returns a DOM Node or null
+    loadString: (xml: string) => void;
+    getXml(): Xml | undefined;
   }
 }
 
+// -----------------------------
+// Types & helpers
+// -----------------------------
 type Theme = "light" | "dark";
+
+const LS_KEYS = {
+  theme: "atomtex:theme",
+  toolbarExpanded: "atomtex:toolbarExpanded",
+  accordionStates: "atomtex:accordionStates",
+  xml: "atomtex:editorXml",
+};
+
+function readLS<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    console.warn("readLS parse error", key, err);
+    return fallback;
+  }
+}
+
+function writeLS(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (err) {
+    console.warn("writeLS error", key, err);
+  }
+}
 
 const prettyNumber = (s: string) =>
   s.replace(/,/g, ".").replace(/\s+/g, "").trim();
@@ -32,6 +78,9 @@ function download(filename: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
+// -----------------------------
+// Templates & docSpec (kept from original, cleaned up)
+// -----------------------------
 const cs137Template = `
 <nuclide name="Cs-137" left="500" right="720" maxactivity="1000000">
   <density value="1" spectrum="" background="" activity="0">
@@ -126,72 +175,210 @@ const initialXml = `<?xml version="1.0" encoding="utf-8"?>
   </geometry>
 </calibration>`;
 
-export default function App() {
-  const [theme, setTheme] = React.useState<Theme>("light");
-  const [fileName, setFileName] = React.useState("calibration.xml");
+// -----------------------------
+// AccordionSection (forwardRef) — controlled enough and accessible
+// -----------------------------
+type AccordionHandle = { setOpen: (value: boolean) => void };
+type AccordionProps = {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  initialOpen?: boolean;
+  onToggle?: (open: boolean) => void;
+};
+
+// use a small, safe fallback if React.useId is not available in the runtime/types
+const useStableId = (prefix = "id") => {
+  const reactId = (React as any).useId ? (React as any).useId() : undefined;
+  const ref = React.useRef<string | undefined>(reactId);
+  if (!ref.current) {
+    // generate simple unique id
+    ref.current = `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+  }
+  return ref.current!;
+};
+
+const AccordionSection = React.forwardRef<AccordionHandle, AccordionProps>(
+  ({ title, icon, children, initialOpen = false, onToggle }, ref) => {
+    const [open, setOpen] = React.useState<boolean>(initialOpen);
+    const contentId = useStableId("accordion");
+
+    // react to parent changes to initialOpen (useful when restoring state)
+    React.useEffect(() => {
+      setOpen(initialOpen);
+    }, [initialOpen]);
+
+    React.useImperativeHandle(
+      ref,
+      () => ({
+        setOpen: (value: boolean) => setOpen(value),
+      }),
+      []
+    );
+
+    const handleToggle = React.useCallback(() => {
+      setOpen((prev) => {
+        const next = !prev;
+        onToggle?.(next);
+        return next;
+      });
+    }, [onToggle]);
+
+    return (
+      <div style={{ marginBottom: 8 }}>
+      <button
+        onClick={handleToggle}
+        aria-expanded={open}
+        aria-controls={contentId}
+        className="accordion-button"
+      >
+        {icon}
+        <span style={{ flex: 1 }}>{title}</span>
+        <span style={{ fontSize: 12, opacity: 0.6 }}>{open ? "▼" : "▲"}</span>
+      </button>
+
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.22 }}
+              style={{ overflow: "hidden" }}
+              id={contentId}
+              role="region"
+            >
+              <div style={{ padding: "6px 8px", fontSize: 13 }}>{children}</div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
+);
+
+// -----------------------------
+// App component (main)
+// -----------------------------
+export default function App(): React.ReactElement {
+  // --- persisted UI states (read once on init) ---
+  const persistedXml = React.useMemo(
+    () => readLS<string | null>(LS_KEYS.xml, null) ?? initialXml,
+    []
+  );
+
+  const [theme, setTheme] = React.useState<Theme>(() =>
+    (readLS<Theme | null>(LS_KEYS.theme, null) as Theme) ?? "light"
+  );
+
+  const [toolbarExpanded, setToolbarExpanded] = React.useState<boolean>(() =>
+    readLS<boolean>(LS_KEYS.toolbarExpanded, true)
+  );
+
+  // accordion states: one boolean per section
+  const ACC_COUNT = 4;
+  const [accordionStates, setAccordionStates] = React.useState<boolean[]>(
+    () => readLS<boolean[]>(LS_KEYS.accordionStates, new Array(ACC_COUNT).fill(false))
+  );
+
+  // We'll compute allOpen derived state, but keep it as state so UI responds immediately.
+  const [allOpen, setAllOpen] = React.useState<boolean>(() =>
+    accordionStates.every(Boolean)
+  );
+
+  // --- non-persisted / semi-persisted states ---
+const [fileName, setFileName] = React.useState(() => {
+  const timestamp = new Date().toISOString().replace(/[-:.]/g, "");
+  return `calibration_${timestamp}.xml`;
+});
   const [lastSaved, setLastSaved] = React.useState<Date | null>(null);
-  const [xmlPreview, setXmlPreview] = React.useState("");
-  const ref = React.useRef<XmlEditor | null>(null);
+  const [xmlPreview, setXmlPreview] = React.useState<string>("");
+  // editorXml is persisted (last loaded/generated XML)
+  const [editorXml, setEditorXml] = React.useState<string>(persistedXml);
+
+  // refs
+  const xmlEditorRef = React.useRef<XmlEditor | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
+  // accordion refs (imperative control)
+  const accordionRefs = React.useMemo(
+    () =>
+      Array.from({ length: ACC_COUNT }, () => React.createRef<AccordionHandle>()),
+    []
+  );
+
+  // ensure persisted accordion states are saved when changed
+  React.useEffect(() => {
+    writeLS(LS_KEYS.accordionStates, accordionStates);
+    setAllOpen(accordionStates.every(Boolean));
+  }, [accordionStates]);
+
+  // persist theme & toolbarExpanded
   React.useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
+    writeLS(LS_KEYS.theme, theme);
   }, [theme]);
 
-  const helpText = [
-    "⚙️ Быстрые команды:",
-    "• Ctrl+O — Открыть XML",
-    "• Ctrl+S — Сохранить XML",
-    "• Ctrl+Enter — Собрать (обновить XML из редактора)",
-    "• ? — Справка",
-    "",
-    // "Подсказка: вводите числа с запятой или точкой — система сама нормализует.",
-  ].join("\n");
+  React.useEffect(() => {
+    writeLS(LS_KEYS.toolbarExpanded, toolbarExpanded);
+  }, [toolbarExpanded]);
 
   React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key.toLowerCase() === "s") { e.preventDefault(); onSave(); }
-      if (e.ctrlKey && e.key.toLowerCase() === "o") { e.preventDefault(); onOpenClick(); }
-      if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); onHarvest(); }
-      if (!e.ctrlKey && e.key === "?") { alert(helpText); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    writeLS(LS_KEYS.xml, editorXml);
+  }, [editorXml]);
+
+  // Keep the XmlEditor instance in xmlEditorRef and ensure it receives the persisted xml on mount
+  const setXmlEditorInstance = React.useCallback(
+    (instance: XmlEditor | null) => {
+      xmlEditorRef.current = instance;
+      if (instance && editorXml) {
+        try {
+          // try to load persisted xml into the editor
+          instance.loadString(editorXml);
+          // also update preview to reflect the loaded string (non-destructive)
+          setXmlPreview((prev) => prev || editorXml);
+        } catch (err) {
+          console.warn("Failed to load persisted XML into editor", err);
+        }
+      }
+    },
+    [editorXml]
+  );
+
+  // helper to update a single accordion state
+  const setAccordionStateAt = React.useCallback((index: number, value: boolean) => {
+    setAccordionStates((prev) => {
+      const copy = [...prev];
+      copy[index] = value;
+      return copy;
+    });
   }, []);
 
-  const onHarvest = () => {
-    if (!ref.current) return;
-    const builder = new Builder({});
-    const xml = ref.current.getXml();
-    if (!xml) return;
-    setXmlPreview(builder.buildObject(xml));
-  };
+  // Toggle all sections
+  const toggleAllSections = React.useCallback(() => {
+    const newState = !allOpen;
+    setAllOpen(newState);
+    const newStates = accordionStates.map(() => newState);
+    setAccordionStates(newStates);
+    // Imperatively notify sections to animate (if they support setOpen)
+    accordionRefs.forEach((r) => r.current?.setOpen(newState));
+  }, [allOpen, accordionStates, accordionRefs]);
 
-  const onOpenClick = () => fileInputRef.current?.click();
+  // ----- Keyboard shortcuts -----
+  const helpText = React.useMemo(
+    () =>
+      [
+        "⚙️ Быстрые команды:",
+        "• Ctrl+O — Открыть XML",
+        "• Ctrl+S — Сохранить XML",
+        "• Ctrl+Enter — Собрать (обновить XML из редактора)",
+        "• ? — Справка",
+      ].join("\n"),
+    []
+  );
 
-  const onOpenFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        if (!ref.current) return;
-        setFileName(f.name);
-        const text = String(reader.result).replace(
-          /(?<=["=])([0-9]+(?:,[0-9]+)+)/g,
-          (m) => prettyNumber(m)
-        );
-        ref.current?.loadString(text);
-        setXmlPreview(text);
-      } catch (err) {
-        alert("Ошибка при чтении файла: " + err);
-      }
-    };
-    reader.readAsText(f, "utf-8");
-    e.target.value = "";
-  };
-
-  const validateBeforeSave = (xmlStr: string): string[] => {
+  // ---- validation (kept from original, unchanged logic) ----
+  const validateBeforeSave = React.useCallback((xmlStr: string): string[] => {
     const errs: string[] = [];
     const tests = [
       { rx: /volume="([^"]+)"/g, name: "volume", check: (v: string) => +prettyNumber(v) >= 0, msg: "volume должно быть неотрицательным числом" },
@@ -220,50 +407,210 @@ export default function App() {
     }
 
     return errs;
-  };
+  }, []);
 
-  const onSave = () => {
-    if (!ref.current) return;
-    const builder = new Builder({});
-    const xmlNode = ref.current.getXml();
-    if (!xmlNode) return;
-    const xmlStr = builder.buildObject(xmlNode);
-
-    const errors = validateBeforeSave(xmlStr);
-    if (errors.length) {
-      alert("Проверьте данные:\n\n• " + errors.join("\n• "));
-      return;
+  // ----- Handlers (stable via useCallback) -----
+  const onHarvest = React.useCallback(() => {
+    const editor = xmlEditorRef.current;
+    if (!editor) return;
+    try {
+      const builder = new Builder({});
+      const xmlNode = editor.getXml();
+      if (!xmlNode) return;
+      const result = builder.buildObject(xmlNode);
+      setXmlPreview(result);
+      setEditorXml(result); // persist the harvested XML
+    } catch (err) {
+      console.warn("onHarvest error", err);
     }
+  }, []);
 
-    download(fileName || "calibration.xml", xmlStr);
-    setLastSaved(new Date());
-    setXmlPreview(xmlStr);
-  };
+  const onOpenClick = React.useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
 
+  const onOpenFile = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = String(reader.result).replace(
+          /(?<=["=])([0-9]+(?:,[0-9]+)+)/g,
+          (m) => prettyNumber(m)
+        );
+        // load into editor and persist
+        if (xmlEditorRef.current) xmlEditorRef.current.loadString(text);
+        setEditorXml(text);
+        setXmlPreview(text);
+        setFileName(f.name);
+      } catch (err) {
+        alert("Ошибка при чтении файла: " + err);
+      }
+    };
+    reader.readAsText(f, "utf-8");
+    // reset the input so same file can be opened again
+    e.target.value = "";
+  }, []);
+
+  const onSave = React.useCallback(async () => {
+    const editor = xmlEditorRef.current;
+    if (!editor) return;
+
+    try {
+      const builder = new Builder({});
+      const xmlNode = editor.getXml();
+      if (!xmlNode) {
+        alert("Редактор пуст или недоступен.");
+        return;
+      }
+
+      const xmlStr = builder.buildObject(xmlNode);
+      const errors = validateBeforeSave(xmlStr);
+      if (errors.length) {
+        alert("Проверьте данные:\n\n• " + errors.join("\n• "));
+        return;
+      }
+
+      // Ask user for a filename
+      let saveName = fileName || "calibration.xml";
+      if ('showSaveFilePicker' in window) {
+        // Modern browsers: file save dialog
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: saveName,
+          types: [
+            {
+              description: "XML Files",
+              accept: { "application/xml": [".xml"] },
+            },
+          ],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(xmlStr);
+        await writable.close();
+        saveName = handle.name;
+      } else {
+        // Fallback: prompt for filename
+        const customName = prompt("Введите имя файла для сохранения", saveName);
+        if (!customName) return; // canceled
+        saveName = customName.endsWith(".xml") ? customName : customName + ".xml";
+        download(saveName, xmlStr); // existing helper function
+      }
+
+      setFileName(saveName);          // update current filename
+      setLastSaved(new Date());       // timestamp last save
+      setXmlPreview(xmlStr);          // update preview
+      setEditorXml(xmlStr);           // persist saved XML
+
+    } catch (err) {
+      console.error("save error", err);
+      alert("Ошибка при сохранении: " + String(err));
+    }
+  }, [fileName, validateBeforeSave]);
+
+  // keyboard shortcuts
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // normalize key (some browsers give "s" or "S")
+      const key = e.key;
+      if (e.ctrlKey && key.toLowerCase() === "s") {
+        e.preventDefault();
+        onSave();
+      } else if (e.ctrlKey && key.toLowerCase() === "o") {
+        e.preventDefault();
+        onOpenClick();
+      } else if (e.ctrlKey && key === "Enter") {
+        e.preventDefault();
+        onHarvest();
+      } else if (!e.ctrlKey && key === "?") {
+        alert(helpText);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onSave, onOpenClick, onHarvest, helpText]);
+
+  // --- Toolbar button helper (compact when toolbarExpanded === false) ---
+  const ToolbarButton: React.FC<{
+    icon: React.ReactNode;
+    label: string;
+    onClick: () => void;
+    title?: string;
+    primary?: boolean;
+  }> = ({ icon, label, onClick, title, primary }) => (
+    <button
+      className={`btn ${primary ? "btn--primary" : ""}`}
+      onClick={onClick}
+      title={title ?? label}
+      aria-label={label}
+      style={{ display: "flex", alignItems: "center", gap: 8 }}
+    >
+      {icon}
+      {toolbarExpanded && <span className="btn__label">{label}</span>}
+    </button>
+  );
+
+  // ----- Render -----
   return (
     <div className="app" data-theme={theme}>
+      {/* HEADER */}
       <header className="app__bar">
         <div className="app__brand">☢️ Калибровка (XML)</div>
+
         <button
           className="btn"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
           aria-label="Сменить тему"
+          title="Сменить тему"
         >
-          Тема: {theme === "dark" ? "Тёмная" : "Светлая"}
+          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          {toolbarExpanded && <span className="btn__label">Тема</span>}
         </button>
+
+        <div style={{ width: 8 }} />
+
+        {/* toolbar expand/collapse toggle */}
+        <button
+          className="btn"
+          onClick={() => setToolbarExpanded((p) => !p)}
+          aria-pressed={toolbarExpanded}
+          title={toolbarExpanded ? "Свернуть панель" : "Развернуть панель"}
+        >
+          {toolbarExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          {toolbarExpanded && <span className="btn__label">Панель</span>}
+        </button>
+
         <div className="app__spacer" />
-        <button className="btn" title="Открыть XML (Ctrl+O)" onClick={onOpenClick} aria-label="Открыть XML">
-          Открыть XML
-        </button>
-        <button className="btn" onClick={onHarvest} title="Собрать (Ctrl+Enter)" aria-label="Собрать XML">
-          Собрать
-        </button>
-        <button className="btn btn--primary" onClick={onSave} title="Сохранить (Ctrl+S)" aria-label="Сохранить XML">
-          Сохранить
-        </button>
-        <button className="btn" onClick={() => alert(helpText)} aria-label="Помощь">
-          ?
-        </button>
+
+        <ToolbarButton
+          icon={<FileUp size={18} />}
+          label="Открыть"
+          onClick={onOpenClick}
+          title="Открыть XML (Ctrl+O)"
+        />
+
+        <ToolbarButton
+          icon={<FileDown size={18} />}
+          label="Собрать"
+          onClick={onHarvest}
+          title="Собрать (Ctrl+Enter)"
+        />
+
+        <ToolbarButton
+          icon={<Save size={18} />}
+          label="Сохранить"
+          onClick={onSave}
+          title="Сохранить (Ctrl+S)"
+          primary
+        />
+
+        <ToolbarButton
+          icon={<HelpCircle size={18} />}
+          label="Справка"
+          onClick={() => alert(helpText)}
+          title="Помощь"
+        />
+
         <input
           ref={fileInputRef}
           type="file"
@@ -274,39 +621,94 @@ export default function App() {
       </header>
 
       <main className="app__main">
-        <section className="panel">
-          <XmlEditor docSpec={docSpec} ref={ref} xml={initialXml} />
+        {/* XML editor section */}
+        <section className="panel editor-panel">
+          <XmlEditor
+            docSpec={docSpec}
+            ref={setXmlEditorInstance as any}
+            xml={editorXml}
+          />
         </section>
 
-        <aside className="panel" style={{ overflow: "auto" }}>
-          <h3 style={{ margin: "6px 6px 10px" }}>Справка / Подсказки</h3>
-          <div className="kv">
-            <b>Формат</b><span>calibration → geometry → mix → nuclide → density → vector</span>
-            <b>Быстрые действия</b><span>ПКМ по элементам → меню (добавить/удалить).</span>
-            {/* <b>Числа</b><span>Можно вводить с запятой, мы конвертируем → «.»</span> */}
-            <b>Единицы</b><span>activity (Бк), volume (л), диапазоны энергий left/right.</span>
+        {/* Sidebar / Accordion */}
+        <aside className={`panel sidebar-panel ${toolbarExpanded ? "expanded" : ""}`}>
+          <div className="toolbar-actions">
+            <button
+              onClick={toggleAllSections}
+              title={allOpen ? "Свернуть всё" : "Развернуть всё"}
+              className="btn btn-toggle-all"
+            >
+              {allOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              {toolbarExpanded && (allOpen ? "Свернуть всё" : "Развернуть всё")}
+            </button>
           </div>
-          <div className="hr" />
-          <h4 style={{ margin: "8px 0 6px" }}>XML предпросмотр</h4>
-          <pre style={{ whiteSpace: "pre-wrap", color: "#9aa4b2" }}>
-            {xmlPreview || "— пока пусто —"}
-          </pre>
+
+          <AccordionSection
+            ref={accordionRefs[0]}
+            initialOpen={accordionStates[0]}
+            onToggle={(open) => setAccordionStateAt(0, open)}
+            title="Формат XML"
+            icon={<Code2 size={16} />}
+          >
+            <div className="kv">
+              <b>Формат</b>
+              <span>calibration → geometry → mix → nuclide → density → vector</span>
+            </div>
+          </AccordionSection>
+
+          <AccordionSection
+            ref={accordionRefs[1]}
+            initialOpen={accordionStates[1]}
+            onToggle={(open) => setAccordionStateAt(1, open)}
+            title="Быстрые действия"
+            icon={<Zap size={16} />}
+          >
+            <div className="kv">
+              <b>Действия</b>
+              <span>ПКМ по элементам → меню (добавить/удалить).</span>
+            </div>
+          </AccordionSection>
+
+          <AccordionSection
+            ref={accordionRefs[2]}
+            initialOpen={accordionStates[2]}
+            onToggle={(open) => setAccordionStateAt(2, open)}
+            title="Единицы измерений"
+            icon={<Ruler size={16} />}
+          >
+            <div className="kv">
+              <b>Единицы</b>
+              <span>activity (Бк), volume (л), диапазоны энергий left/right.</span>
+            </div>
+          </AccordionSection>
+
+          <AccordionSection
+            ref={accordionRefs[3]}
+            initialOpen={accordionStates[3]}
+            onToggle={(open) => setAccordionStateAt(3, open)}
+            title="XML предпросмотр"
+            icon={<FileDown size={16} />}
+          >
+            <pre className="xml-preview">{xmlPreview || "— пока пусто —"}</pre>
+          </AccordionSection>
         </aside>
       </main>
 
-      <footer className="app__status">
-        <span>
-          <img src="./css/atomtex.png" alt="ATOMTEX" style={{ height: 20, verticalAlign: "middle", marginRight: 6 }} />
-          ATOMTEX
+
+      {/* FOOTER */}
+      <footer className="app__status" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 10px" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <img src="./css/atomtex.png" alt="ATOMTEX" style={{ height: 20, verticalAlign: "middle" }} />
+          <span>ATOMTEX</span>
         </span>
+
         <span>•</span>
         <span>Файл: {fileName}</span>
         <span>•</span>
-        <span>Сохранено: {lastSaved ? lastSaved.toLocaleTimeString() : "—"}</span>
+        <span>Сохранено: {lastSaved ? lastSaved.toLocaleString() : "—"}</span>
         <span>•</span>
-        <span>Горячие клавиши: Ctrl+O / Ctrl+S / Ctrl+Enter</span>
+        <span style={{ marginLeft: "auto" }}>Горячие клавиши: Ctrl+O / Ctrl+S / Ctrl+Enter</span>
       </footer>
-
     </div>
   );
 }
