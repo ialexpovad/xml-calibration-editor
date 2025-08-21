@@ -1,0 +1,16 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <circle cx="128" cy="128" r="128" fill="#1E1E1E"/>
+
+  <!-- Radiation trefoil -->
+  <g transform="translate(128,128)">
+    <circle r="30" fill="#FFD700"/>
+    <path d="M0,-80 A80,80 0 0,1 69.28,40 L0,0 Z" fill="#FFD700"/>
+    <path d="M0,-80 A80,80 0 0,0 -69.28,40 L0,0 Z" fill="#FFD700"/>
+    <circle r="15" fill="#1E1E1E"/>
+  </g>
+
+  <!-- XML brackets -->
+  <text x="60" y="200" font-family="Arial, sans-serif" font-size="40" fill="#FFFFFF">&lt; XML</text>
+  <text x="180" y="200" font-family="Arial, sans-serif" font-size="40" fill="#FFFFFF"> &gt;</text>
+</svg>
