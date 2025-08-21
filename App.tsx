@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion"; // for animation
 
+
 // -----------------------------
 // Module augmentation (XmlEditor public API)
 // -----------------------------
@@ -97,6 +98,108 @@ const k40Template = `
   </density>
 </nuclide>`.trim();
 
+// Utils.tsx — new helpers for multiply/divide subtree
+// place near other exports in this file
+
+/**
+ * parse a numeric string tolerant to comma decimals
+ */
+const parseNumeric = (s: string): number => {
+  if (s == null) return NaN;
+  const normalized = String(s).replace(/,/g, ".").trim();
+  return Number(normalized);
+};
+
+/**
+ * Formats a number back to string. Keep it simple (no trailing garbage).
+ * You can improve to preserve scientific notation if needed.
+ */
+const formatNumeric = (n: number): string => {
+  // use toPrecision for very large/small values if you want:
+  return String(n);
+};
+
+/**
+ * Recursively traverse an Element (Xonomy-style) and multiply specified attributes.
+ * element: object with $. and $$ keys (Element)
+ */
+const traverseMultiplyAttributes = (element: any, factor: number, attrs: string[]) => {
+  if (!element) return;
+  // attributes are in element.$
+  if (element.$) {
+    for (const a of attrs) {
+      if (Object.prototype.hasOwnProperty.call(element.$, a)) {
+        const raw = element.$[a];
+        const num = parseNumeric(raw);
+        if (Number.isFinite(num)) {
+          element.$[a] = formatNumeric(num * factor);
+        }
+      }
+    }
+  }
+  // recurse into children array element.$$
+  if (Array.isArray(element.$$)) {
+    for (const child of element.$$) {
+      traverseMultiplyAttributes(child, factor, attrs);
+    }
+  }
+};
+
+/**
+ * Generic: multiply numeric attributes in the selected node subtree.
+ * - xml: whole document
+ * - id: path to node to modify
+ * - factor: numeric multiplier
+ * - attrs: list of attribute names to scale (default: ['maxactivity','activity','value'])
+ */
+export const multiplySubtreeAttributes = async (
+  xml: Xml,
+  id: string[],
+  factor: number,
+  attrs: string[] = ["maxactivity", "activity", "value"]
+): Promise<Xml> => {
+  return Util.modifyXml(xml, id, (node) => {
+    // Node may be an object representing the element (with $ and $$)
+    // We operate on a deep clone to be safe (optional)
+    // but here we'll mutate the node in place and return it.
+    traverseMultiplyAttributes(node, factor, attrs);
+    return node;
+  });
+};
+
+/**
+ * Convenience wrapper that prompts user for coefficient and multiplies.
+ * Use this in menu actions attached to nuclide / mix / geometry.
+ */
+export const multiplyPrompt = (attrs?: string[]) =>
+  async (xml: Xml, id: string[]): Promise<Xml> => {
+    const input = prompt("Введите коэффициент умножения (напр. 2 или 0.5):", "1");
+    if (input === null) return xml; // canceled
+    const factor = parseNumeric(input);
+    if (!Number.isFinite(factor)) {
+      alert("Неверный коэффициент — введите число, например: 2 или 0.5");
+      return xml;
+    }
+    return multiplySubtreeAttributes(xml, id, factor, attrs);
+  };
+
+/**
+ * Divide version: uses multiply by reciprocal.
+ */
+export const dividePrompt = (attrs?: string[]) =>
+  async (xml: Xml, id: string[]): Promise<Xml> => {
+    const input = prompt("Введите коэффициент деления (напр. 2 — делит на 2):", "1");
+    if (input === null) return xml; // canceled
+    const divisor = parseNumeric(input);
+    if (!Number.isFinite(divisor) || divisor === 0) {
+      alert("Неверный коэффициент — введите ненулевое число, например: 2 или 0.5");
+      return xml;
+    }
+    const factor = 1 / divisor;
+    return multiplySubtreeAttributes(xml, id, factor, attrs);
+  };
+
+
 const docSpec: DocSpec = {
   elements: {
     calibration: {
@@ -136,6 +239,12 @@ const docSpec: DocSpec = {
       menu: [
         { action: Util.newElementChild('<density value="0.0" spectrum="" background="" activity="0" />'), caption: "Добавить плотность" },
         { action: Util.deleteElement, caption: "Удалить нуклид" },
+
+        // Multiply only this nuclide subtree (maxactivity, density.activity, vector.value)
+        { action: multiplyPrompt(), caption: "Умножить на..." },
+
+        // Divide (asks divisor; dividing by 2 -> halves values)
+        { action: dividePrompt(), caption: "Разделить на..." },
       ],
     },
     density: {
