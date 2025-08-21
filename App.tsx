@@ -257,6 +257,11 @@ const docSpec: DocSpec = {
       menu: [
         { action: Util.newElementChild('<vector w="1" n="1" value="0.0" />'), caption: "Добавить вектор" },
         { action: Util.deleteElement, caption: "Удалить плотность" },
+        // Multiply: density subtree, cascades to all vectors inside
+        { action: multiplyPrompt(["activity", "value"]), caption: "Умножить на..." },
+
+        // Divide: density subtree
+        { action: dividePrompt(["activity", "value"]), caption: "Разделить на..." },
       ],
     },
     vector: {
@@ -265,7 +270,14 @@ const docSpec: DocSpec = {
         n: { asker: Util.askString },
         value: { asker: Util.askString },
       },
-      menu: [{ action: Util.deleteElement, caption: "Удалить вектор" }],
+      menu: [
+        { action: Util.deleteElement, caption: "Удалить вектор" },
+        // Multiply: only this vector
+        { action: multiplyPrompt(["value"]), caption: "Умножить на..." },
+
+        // Divide: only this vector
+        { action: dividePrompt(["value"]), caption: "Разделить на..." },
+      ],
     },
   },
 };
